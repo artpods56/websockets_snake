@@ -21,6 +21,8 @@ class Player:
         self.speed = 2
         self.radius = 5
         self.alive = True
+        self.ink = 250
+        self.reload_time = 50
 
 class GameState:
     def __init__(self):
@@ -53,17 +55,27 @@ class GameState:
             if player.alive:
                 new_x = player.x + player.speed * math.cos(player.direction)
                 new_y = player.y + player.speed * math.sin(player.direction)
-                player.curve.append((player.x,player.y))
+                if player.ink > 0:
+                    player.curve.append((player.x,player.y))
+                player.ink -= 1
+                
+                if player.ink == -player.reload_time:
+                    player.ink = 250
+                    
+                
 
                 #collision with edges
                 if new_x < 0 + player.radius or new_x > self.width - player.radius or new_y < 0 + player.radius or new_y > self.height - player.radius :
-                    player.alive = False
+                    player.direction = player.direction - 180
+                    #player.alive = False
+
                 #collision with self
                 for point in player.curve[:-10]:
                     dist = math.sqrt((new_x - point[0])**2 + (new_y- point[1])**2)
-                    if dist < 2 * player.radius:
-                         player.alive = False
-                         break
+                    if dist < player.radius:
+                        player.direction = player.direction - 180
+                         #player.alive = False
+                         #break
                 
                 if player.alive:
                     player.x = new_x
@@ -74,11 +86,13 @@ class GameState:
                     if other_player.player_id != player.player_id and other_player.alive:
                         for point in other_player.curve:
                             dist = math.sqrt((new_x - point[0])**2 + (new_y- point[1])**2)
-                            if dist < 2 * player.radius:
-                                player.alive = False
-                                break
+                            if dist < player.radius:
+                                player.direction = - player.direction
+                                #player.alive = False
+                                #break
                         
                         if not player.alive:
+
                             break
                         
 

@@ -113,14 +113,14 @@ class SnakeGame {
       if (!player.curve) continue;
       // Draw trail
       this.ctx.beginPath();
-      this.ctx.strokeStyle = player.color;
-      this.ctx.moveTo(player.curve[0][0], player.curve[0][1]);
+      this.ctx.fillStyle = player.color;
 
       for (const point of player.curve) {
-        this.ctx.lineTo(point[0], point[1]);
+        this.ctx.beginPath();
+        this.ctx.arc(point[0], point[1], 2, 0, Math.PI * 2);
+        this.ctx.fill();
       }
 
-      this.ctx.stroke();
 
       if (player.alive) {
         // Draw player head
