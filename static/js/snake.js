@@ -4,12 +4,13 @@ class SnakeGame {
     this.ctx = this.canvas.getContext('2d');
     this.ws = null;
     this.state = "menu"; // menu/lobby/game
-    this.lobbies = [];
+    this.lobbies = {};
     this.currentLobby = null;
     this.currentLobbyId = null;
     this.playerId = null;
     this.players = [];
     this.round = 1;
+    this.gameState = null;
 
     this.setupCanvas();
     this.connectWebSocket();
@@ -47,6 +48,11 @@ class SnakeGame {
   }
 
   handleLobbyUpdate(msg) {
+    if (msg.status === 'playing') {
+      document.querySelector('.overlay').style.display = 'none';
+    }
+
+
     // If the lobby already exists, update it; otherwise, add it to the lobbies object
     if (!this.lobbies[msg.lobby_id]) {
       this.lobbies[msg.lobby_id] = msg; // Add new lobby
@@ -93,6 +99,7 @@ class SnakeGame {
           lobbyId: lobby.lobby_id
         }));
         this.currentLobbyId = lobby.lobby_id; // Set the current lobby ID
+        document.getElementById("lobbyUI").style.display = "block";
       });
 
       lobbyItem.appendChild(joinButton);
@@ -149,7 +156,10 @@ class SnakeGame {
   }
 
   drawGame() {
+    if (!this.gameState) return;
+
     this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+
 
     // Draw trails
     this.gameState.players.forEach(player => {

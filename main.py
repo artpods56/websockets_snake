@@ -88,22 +88,26 @@ class GameState:
         # Boundary check
         if (new_x < 0 + player.radius or new_x > self.width - player.radius or
             new_y < 0 + player.radius or new_y > self.height - player.radius):
+            print(f"Game | Player {player} went out of bounds")
             return True
 
         # Self collision (last 40 points)
-        for point in player.curve[-40:]:
-            if math.dist((new_x, new_y), point) < player.radius * 1.5:
-                return True
+        #for point in player.curve[-40:]:
+        #    if math.dist((new_x, new_y), point) < player.radius * 1.5:
+        #        print(f"Game | Player {player} crashed into himself")
+        #        return True
 
         # Other players' trails
         for other in self.players.values():
             if other.player_id != player.player_id:
                 for point in other.curve:
                     if math.dist((new_x, new_y), point) < player.radius * 1.5:
+                        print(f"Game | Player {player} crashed into {other.player_id} player!")
                         return True
         return False
 
     def reset_round(self):
+        print("Game | Round reset")
         self.round += 1
         for player in self.players.values():
             player.x = random.randint(50, self.width - 50)
@@ -173,8 +177,8 @@ class ConnectionManager:
             } for p in lobby.players.values()],
             "round": lobby.game_state.round
         }
-        print(lobby_data)
-        print(self.active_connections)
+        #print(lobby_data)
+        #print(self.active_connections)
         for ws in self.active_connections.values():
             await ws.send_json(lobby_data)
 
