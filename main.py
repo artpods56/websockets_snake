@@ -142,6 +142,7 @@ class ConnectionManager:
         await websocket.accept()
         player_id = str(random.randint(1000, 9999))
         self.active_connections[player_id] = websocket
+        await self.send_lobby_list()  # Send the updated lobby list to the new player
         return player_id
 
     def disconnect(self, player_id: str):
@@ -154,12 +155,13 @@ class ConnectionManager:
                 del self.lobbies[lobby_id].game_state.players[player_id]
                 if not self.lobbies[lobby_id].players:
                     del self.lobbies[lobby_id]
-            del self.player_lobby_map[player_id]
+                del self.player_lobby_map[player_id]
+                asyncio.create_task(self.send_lobby_list())  # Update lobby list after player leaves
 
     async def broadcast_lobby(self, lobby: Lobby):
-        print(f"Broadcasted lobby: {lobby}")
         lobby_data = {
             "type": "lobby_update",
+            "lobby_id": lobby.lobby_id,
             "status": lobby.status,
             "countdown": lobby.countdown,
             "players": [{
@@ -171,28 +173,20 @@ class ConnectionManager:
             } for p in lobby.players.values()],
             "round": lobby.game_state.round
         }
+        print(lobby_data)
+        print(self.active_connections)
         for ws in self.active_connections.values():
-            await ws.send_json(data=lobby_data) 
-       # for player_id in lobby.players:
-       #    if player_id in self.active_connections:
-       #        await self.active_connections[player_id].send_json(lobby_data)
+            await ws.send_json(lobby_data)
 
     async def handle_input(self, player_id: str, data: dict):
-        lobby_id = self.player_lobby_map.get(player_id)
-        print(f"Client | User {player_id} input of: {data["type"]}")
-        #if not lobby_id or lobby_id not in self.lobbies:
-        #    "returning because no lobby"
-        #    return
-
-        #lobby = self.lobbies[lobby_id]
-        #player = lobby.players.get(player_id)
-
+        print(f"Client | Player {player_id} requrested {data['type']}")
         if data["type"] == "new_lobby":
             lobby_id = str(random.randint(1000, 9999))
             lobby = Lobby(lobby_id)
-            self.lobbies[lobby_id] = lobby 
+            self.lobbies[lobby_id] = lobby
             self.player_lobby_map[player_id] = lobby_id
             await self.broadcast_lobby(lobby)
+            await self.send_lobby_list()  # Update lobby list after creating a new lobby
 
         elif data["type"] == "join_lobby":
             lobby_id = data["lobbyId"]
@@ -201,29 +195,46 @@ class ConnectionManager:
                 self.player_lobby_map[player_id] = lobby_id
                 await self.broadcast_lobby(self.lobbies[lobby_id])
 
-        if data["type"] == "player_ready":
-            player.ready = not player.ready
-            if lobby.all_ready() and lobby.status == "waiting":
-                lobby.status = "countdown"
-                asyncio.create_task(self.start_countdown(lobby))
+        elif data["type"] == "player_ready":
+            lobby_id = self.player_lobby_map.get(player_id)
+            if lobby_id and lobby_id in self.lobbies:
+                lobby = self.lobbies[lobby_id]
+                player = lobby.players.get(player_id)
+                if player:
+                    player.ready = not player.ready
+                    if lobby.all_ready() and lobby.status == "waiting":
+                        lobby.status = "countdown"
+                        asyncio.create_task(self.start_countdown(lobby))
+                    await self.broadcast_lobby(lobby)
 
         elif data["type"] == "player_name":
-            player.name = data["name"][:15]
+            lobby_id = self.player_lobby_map.get(player_id)
+            if lobby_id and lobby_id in self.lobbies:
+                lobby = self.lobbies[lobby_id]
+                player = lobby.players.get(player_id)
+                if player:
+                    player.name = data["name"][:15]
+                    await self.broadcast_lobby(lobby)
 
         elif data["type"] == "player_input":
-            player.turning = data.get("direction")
-
-        #await self.broadcast_lobby(lobby)
-
+            lobby_id = self.player_lobby_map.get(player_id)
+            if lobby_id and lobby_id in self.lobbies:
+                lobby = self.lobbies[lobby_id]
+                player = lobby.players.get(player_id)
+                if player:
+                    player.turning = data.get("direction")
 
     async def send_lobby_list(self):
-        print("Broadcasting lobby list to users")
         lobby_list = list(self.lobbies.keys())
         for ws in self.active_connections.values():
-            await ws.send_json({
-                "type": "lobby_list",
-                "lobbies": lobby_list
-            })
+
+            for lobby in self.lobbies.values():
+                await self.broadcast_lobby(lobby)
+
+            #await ws.send_json({
+            #    "type": "lobby_list",
+            #    "lobbies": lobby_list
+            #})
 
     async def start_countdown(self, lobby: Lobby):
         while lobby.countdown > 0 and lobby.status == "countdown":

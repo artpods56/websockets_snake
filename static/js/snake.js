@@ -46,32 +46,60 @@ class SnakeGame {
     };
   }
 
-
   handleLobbyUpdate(msg) {
-    this.lobbies = msg.lobbies;
-    this.updateLobbyList();
-    this.currentLobby = msg;
-    this.players = msg.players;
-    this.state = msg.status === 'playing' ? 'game' : 'lobby';
-    this.round = msg.round;
-  }
+    // If the lobby already exists, update it; otherwise, add it to the lobbies object
+    if (!this.lobbies[msg.lobby_id]) {
+      this.lobbies[msg.lobby_id] = msg; // Add new lobby
+    } else {
+      // Update existing lobby with new data
+      this.lobbies[msg.lobby_id] = { ...this.lobbies[msg.lobby_id], ...msg };
+    }
 
+    // Update the lobby list display
+    this.updateLobbyList();
+
+    // If this is the current lobby, update the current lobby state
+    if (this.currentLobbyId === msg.lobby_id) {
+      this.currentLobby = msg;
+      this.players = msg.players;
+      this.state = msg.status === 'playing' ? 'game' : 'lobby';
+      this.round = msg.round;
+    }
+  }
 
   updateLobbyList() {
     const list = document.getElementById('lobbyList');
-    list.innerHTML = '';
-    this.lobbies.forEach(lobby => {
-      const btn = document.createElement('button');
-      btn.textContent = `Join Lobby ${lobby}`;
-      btn.addEventListener('click', () => {
+    list.innerHTML = ''; // Clear the current list
+
+    // Iterate over all lobbies and create a list item for each
+    Object.values(this.lobbies).forEach(lobby => {
+      const lobbyItem = document.createElement('div');
+      lobbyItem.className = 'lobby-item';
+
+      // Display lobby information
+      lobbyItem.innerHTML = `
+            <strong>Lobby ID:</strong> ${lobby.lobby_id}<br>
+            <strong>Status:</strong> ${lobby.status}<br>
+            <strong>Players:</strong> ${lobby.players.length}/${lobby.max_players || 6}<br>
+            <strong>Round:</strong> ${lobby.round}
+        `;
+
+      // Add a "Join" button
+      const joinButton = document.createElement('button');
+      joinButton.textContent = 'Join Lobby';
+      joinButton.addEventListener('click', () => {
         this.ws.send(JSON.stringify({
           type: 'join_lobby',
-          lobbyId: lobby
+          lobbyId: lobby.lobby_id
         }));
+        this.currentLobbyId = lobby.lobby_id; // Set the current lobby ID
       });
-      list.appendChild(btn);
+
+      lobbyItem.appendChild(joinButton);
+      list.appendChild(lobbyItem);
     });
   }
+
 
   handleGameState(msg) {
     this.gameState = msg;
