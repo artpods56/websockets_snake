@@ -24,7 +24,7 @@ class Player:
     score: int = 0
     curve: List[tuple] = None
     turning: Optional[str] = None
-    speed: float = 2.5
+    speed: float = 1.5
     radius: int = 5
     ink: int = 300
 
@@ -58,9 +58,9 @@ class GameState:
         for player in alive_players:
             # Update direction
             if player.turning == 'left':
-                player.direction -= 0.04
+                player.direction -= 0.1
             elif player.turning == 'right':
-                player.direction += 0.04
+                player.direction += 0.1
             player.direction %= 2 * math.pi
 
             # Update position
@@ -110,8 +110,8 @@ class GameState:
         print("Game | Round reset")
         self.round += 1
         for player in self.players.values():
-            player.x = random.randint(50, self.width - 50)
-            player.y = random.randint(50, self.height - 50)
+            player.x = random.randint(250, self.width - 250)
+            player.y = random.randint(250, self.height - 250)
             player.direction = random.uniform(0, 2 * math.pi)
             player.curve = [(player.x, player.y)]
             player.alive = True
@@ -124,11 +124,13 @@ class Lobby:
         self.players: Dict[str, Player] = {}
         self.game_state = GameState()
         self.status: str = "waiting"  # waiting/countdown/playing/results
-        self.countdown: int = 10
-        self.max_players: int = 6
+        self.countdown: int = 3
+        self.max_players: int = 10
         self.colors = ["#FF6B6B", "#4ECDC4", "#45B7D1", "#96CEB4", "#FFEEAD", "#FF9999"]
 
     def add_player(self, player_id: str, name: str):
+        if self.status != "waiting":
+            return  # Prevent joining during active games
         color = self.colors[len(self.players) % len(self.colors)]
         self.game_state.add_player(player_id, name, color)
         self.players[player_id] = self.game_state.players[player_id]
@@ -163,6 +165,7 @@ class ConnectionManager:
                 asyncio.create_task(self.send_lobby_list())  # Update lobby list after player leaves
 
     async def broadcast_lobby(self, lobby: Lobby):
+       
         lobby_data = {
             "type": "lobby_update",
             "lobby_id": lobby.lobby_id,
@@ -175,8 +178,10 @@ class ConnectionManager:
                 "score": p.score,
                 "color": p.color
             } for p in lobby.players.values()],
-            "round": lobby.game_state.round
+            "round": lobby.game_state.round,
+            "game_over": lobby.status == "game_over"  # Add this line
         }
+
         #print(lobby_data)
         #print(self.active_connections)
         for ws in self.active_connections.values():
@@ -252,28 +257,48 @@ class ConnectionManager:
             await self.broadcast_lobby(lobby)
             asyncio.create_task(self.run_game_round(lobby))
 
+ # In ConnectionManager class
     async def run_game_round(self, lobby: Lobby):
         start_time = time.time()
         while lobby.status == "playing":
             game_active = lobby.game_state.update()
             await self.broadcast_game_state(lobby)
             
-            if not game_active:
+            if not game_active or (time.time() - start_time > 60):
                 lobby.status = "results"
-                lobby.countdown = 8
+                lobby.countdown = 3
                 # Update scores
-                for p in lobby.game_state.players.values():
-                    if p.alive:
-                        p.score += 1
-                await self.broadcast_lobby(lobby)
-                await asyncio.sleep(5)
-                lobby.status = "countdown"
-                lobby.countdown = 10
-                lobby.game_state.reset_round()
-                await self.start_countdown(lobby)
+                survivors = [p for p in lobby.game_state.players.values() if p.alive]
+                if survivors:
+                    survivors[0].score += 1
+                
+                # Check if round 10 reached
+                if lobby.game_state.round >= 10:
+                    lobby.status = "game_over"
+                    await self.broadcast_lobby(lobby)
+                    # Cleanup after 10 seconds
+                    await asyncio.sleep(10)
+                    self.cleanup_lobby(lobby.lobby_id)
+                    return
+                else:
+                    await self.broadcast_lobby(lobby)
+                    await asyncio.sleep(5)
+                    lobby.status = "countdown"
+                    lobby.countdown = 3
+                    lobby.game_state.reset_round()
+                    await self.start_countdown(lobby)
                 break
             
             await asyncio.sleep(1/60)
+
+    def cleanup_lobby(self, lobby_id: str):
+        if lobby_id in self.lobbies:
+            # Disconnect all players in this lobby
+            for player_id in list(self.lobbies[lobby_id].players.keys()):
+                self.disconnect(player_id)
+
+            if self.lobbies[lobby_id]:
+                del self.lobbies[lobby_id]           
 
     async def broadcast_game_state(self, lobby: Lobby):
         game_state = {
