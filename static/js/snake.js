@@ -50,6 +50,10 @@ class SnakeGame {
   handleLobbyUpdate(msg) {
     if (msg.status === 'playing') {
       document.querySelector('.overlay').style.display = 'none';
+    } else if (msg.status === 'game_over') {
+      this.showGameOver(msg);
+      document.querySelector('.overlay').style.display = 'block';
+      this.state = "menu";
     }
 
 
@@ -71,6 +75,31 @@ class SnakeGame {
       this.state = msg.status === 'playing' ? 'game' : 'lobby';
       this.round = msg.round;
     }
+  }
+
+  showGameOver(msg) {
+    const overlay = document.querySelector('.overlay');
+    overlay.innerHTML = `
+        <h2 style="color: #e74c3c; margin-bottom: 20px;">Game Over!</h2>
+        <div style="margin-bottom: 20px; font-size: 1.2em;">Final Scores:</div>
+    `;
+
+    // Sort players by score
+    msg.players.sort((a, b) => b.score - a.score).forEach((player, index) => {
+      overlay.innerHTML += `
+            <div style="margin: 10px 0; color: ${player.color}; 
+                font-size: ${index === 0 ? '1.3em' : '1em'}">
+                ${player.name}: ${player.score} ${index === 0 ? '🏆' : ''}
+            </div>
+        `;
+    });
+
+    // Add restart button
+    const restartBtn = document.createElement('button');
+    restartBtn.style.marginTop = '20px';
+    restartBtn.textContent = 'New Game';
+    restartBtn.addEventListener('click', () => window.location.reload());
+    overlay.appendChild(restartBtn);
   }
 
   updateLobbyList() {
@@ -113,6 +142,16 @@ class SnakeGame {
     this.drawGame();
   }
 
+  handleTouch(e) {
+    if (this.state !== 'game') return;
+    const rect = this.canvas.getBoundingClientRect();
+    const x = e.touches[0].clientX - rect.left;
+    this.sendInput(x < this.canvas.width / 2 ? 'left' : 'right');
+    e.preventDefault();
+  }
+
+
+
   setupEventListeners() {
     // Keyboard controls
     document.addEventListener('keydown', (e) => {
@@ -146,6 +185,11 @@ class SnakeGame {
       this.ws.send(JSON.stringify({ type: 'new_lobby' }));
     });
 
+    this.canvas.addEventListener('touchstart', (e) => this.handleTouch(e));
+
+    this.canvas.addEventListener('touchend', () => this.sendInput('none'));
+
+    document.body.style.touchAction = 'none'; // Prevent scrolling
   }
 
   sendInput(direction) {
@@ -160,6 +204,10 @@ class SnakeGame {
 
     this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
+    // Arena borders
+    this.ctx.strokeStyle = '#FFFFFF';
+    this.ctx.lineWidth = 4;
+    this.ctx.strokeRect(2, 2, this.canvas.width - 4, this.canvas.height - 4);
 
     // Draw trails
     this.gameState.players.forEach(player => {
@@ -183,10 +231,10 @@ class SnakeGame {
     // Draw HUD
     this.ctx.fillStyle = '#2c3e50';
     this.ctx.font = '20px Arial';
-    this.ctx.fillText(`Round: ${this.round}`, 20, 30);
+    this.ctx.fillText(`Round: ${this.round}`, 200, 30);
     this.players.forEach((player, i) => {
       this.ctx.fillStyle = player.color;
-      this.ctx.fillText(`${player.name}: ${player.score}`, 20, 60 + i * 30);
+      this.ctx.fillText(`${player.name}: ${player.score}`, 200, 60 + i * 30);
     });
   }
 
@@ -206,7 +254,7 @@ class SnakeGame {
       this.ctx.fillStyle = player.color;
       this.ctx.fillText(
         `${player.name} ${player.ready ? '✓' : ''}`,
-        100, 150 + i * 40
+        250, 150 + i * 40
       );
     });
 

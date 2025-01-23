@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Lobby-Based Curve Game</title>
+    <title>Snake Hunger Games</title>
     <style>
         body { margin: 0; overflow: hidden; background: #2c3e50; }
         #gameCanvas {position: relative; display: block; z-index: 1; margin: 20px auto; }
@@ -14,7 +14,33 @@
             padding: 15px;
             border-radius: 10px;
         }
+
         input, button { margin: 5px; padding: 8px; }
+    
+    @media (max-width: 600px) {
+      .overlay {
+          width: 90%;
+          left: 5%;
+          top: 10px;
+      }
+      input, button {
+          width: 100%;
+          box-sizing: border-box;
+      }
+    }
+
+    #game-over {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(0, 0, 0, 0.9);
+    padding: 2rem;
+    border-radius: 10px;
+    color: white;
+    text-align: center;
+    z-index: 999;
+    }
     </style>
 </head>
 <body>
