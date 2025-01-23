@@ -2,195 +2,307 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 import json
 import random
-from typing import Dict, List
+from typing import Dict, List, Optional
 import asyncio
 import math
+import time
+from dataclasses import dataclass
 
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static", html=True), name="static")
 
-
+@dataclass
 class Player:
-    def __init__(self, player_id, x, y, direction, color):
-        self.player_id = player_id
-        self.x = x
-        self.y = y
-        self.direction = direction
-        self.color = color
-        self.curve = [(x, y)]
-        self.speed = 2
-        self.radius = 5
-        self.alive = True
-        self.ink = 250
-        self.reload_time = 50
+    player_id: str
+    x: float
+    y: float
+    direction: float
+    color: str
+    name: str
+    ready: bool = False
+    alive: bool = True
+    score: int = 0
+    curve: List[tuple] = None
+    turning: Optional[str] = None
+    speed: float = 2.5
+    radius: int = 5
+    ink: int = 300
+
+    def __post_init__(self):
+        self.curve = [(self.x, self.y)]
 
 class GameState:
-    def __init__(self):
+    def __init__(self, width=800, height=600):
         self.players: Dict[str, Player] = {}
-        self.width = 800
-        self.height = 600
-        self.colors = ["#FF0000", "#00FF00", "#0000FF", "#FFFF00", "#00FFFF", "#FF00FF"]
+        self.width = width
+        self.height = height
+        self.colors = ["#FF6B6B", "#4ECDC4", "#45B7D1", "#96CEB4", "#FFEEAD", "#FF9999"]
+        self.round = 1
         
-    def add_player(self, player_id: str):
-        if len(self.players) >= 6:
-           return
-        
+    def add_player(self, player_id: str, name: str, color: str):
         x = random.randint(50, self.width - 50)
         y = random.randint(50, self.height - 50)
         direction = random.uniform(0, 2 * math.pi)
-        color = self.colors[len(self.players)]
-
-        self.players[player_id] = Player(player_id, x, y, direction, color)
+        self.players[player_id] = Player(
+            player_id=player_id,
+            x=x,
+            y=y,
+            direction=direction,
+            color=color,
+            name=name
+        )
     
-    def update_player_direction(self, player_id: str, direction: str):
-        player = self.players.get(player_id)
-        if player:
-           if direction == "left":
-                player.direction -= 0.1
-           elif direction == "right":
-                player.direction += 0.1
-
     def update(self):
-        for player in self.players.values():
-            if player.alive:
-                new_x = player.x + player.speed * math.cos(player.direction)
-                new_y = player.y + player.speed * math.sin(player.direction)
-                if player.ink > 0:
-                    player.curve.append((player.x,player.y))
+        alive_players = [p for p in self.players.values() if p.alive]
+        
+        for player in alive_players:
+            # Update direction
+            if player.turning == 'left':
+                player.direction -= 0.04
+            elif player.turning == 'right':
+                player.direction += 0.04
+            player.direction %= 2 * math.pi
+
+            # Update position
+            new_x = player.x + player.speed * math.cos(player.direction)
+            new_y = player.y + player.speed * math.sin(player.direction)
+
+            # Add to curve if inking
+            if player.ink > 0:
+                player.curve.append((player.x, player.y))
                 player.ink -= 1
-                
-                if player.ink == -player.reload_time:
-                    player.ink = 250
-                    
-                
+            elif player.ink <= -100:
+                player.ink = 300
 
-                #collision with edges
-                if new_x < 0 + player.radius or new_x > self.width - player.radius or new_y < 0 + player.radius or new_y > self.height - player.radius :
-                    player.direction = player.direction - 180
-                    #player.alive = False
+            # Check collisions
+            if self.check_collision(player, new_x, new_y):
+                player.alive = False
+                continue
 
-                #collision with self
-                for point in player.curve[:-10]:
-                    dist = math.sqrt((new_x - point[0])**2 + (new_y- point[1])**2)
-                    if dist < player.radius:
-                        player.direction = player.direction - 180
-                         #player.alive = False
-                         #break
-                
-                if player.alive:
-                    player.x = new_x
-                    player.y = new_y
+            player.x = new_x
+            player.y = new_y
 
-                #collision with other players
-                for other_player in self.players.values():
-                    if other_player.player_id != player.player_id and other_player.alive:
-                        for point in other_player.curve:
-                            dist = math.sqrt((new_x - point[0])**2 + (new_y- point[1])**2)
-                            if dist < player.radius:
-                                player.direction = - player.direction
-                                #player.alive = False
-                                #break
-                        
-                        if not player.alive:
+        return len(alive_players) > 1
 
-                            break
-                        
+    def check_collision(self, player, new_x, new_y):
+        # Boundary check
+        if (new_x < 0 + player.radius or new_x > self.width - player.radius or
+            new_y < 0 + player.radius or new_y > self.height - player.radius):
+            print(f"Game | Player {player} went out of bounds")
+            return True
 
-    def get_state(self):
-        """Returns a simplified game state to be sent to clients"""
-        player_states = {}
-        for player_id, player in self.players.items():
-            player_states[player_id] = {
-                "x": player.x,
-                "y": player.y,
-                "direction": player.direction,
-                "color": player.color,
-                "curve": player.curve,
-                "alive": player.alive
-            }
-        return {
-            "players": player_states,
-             "width": self.width,
-            "height": self.height
-        }
-    
-    def reset(self):
-      for player in self.players.values():
-        x = random.randint(50, self.width - 50)
-        y = random.randint(50, self.height - 50)
-        direction = random.uniform(0, 2 * math.pi)
-        player.x = x
-        player.y = y
-        player.direction = direction
-        player.curve = [(x,y)]
-        player.alive = True
+        # Self collision (last 40 points)
+        #for point in player.curve[-40:]:
+        #    if math.dist((new_x, new_y), point) < player.radius * 1.5:
+        #        print(f"Game | Player {player} crashed into himself")
+        #        return True
+
+        # Other players' trails
+        for other in self.players.values():
+            if other.player_id != player.player_id:
+                for point in other.curve:
+                    if math.dist((new_x, new_y), point) < player.radius * 1.5:
+                        print(f"Game | Player {player} crashed into {other.player_id} player!")
+                        return True
+        return False
+
+    def reset_round(self):
+        print("Game | Round reset")
+        self.round += 1
+        for player in self.players.values():
+            player.x = random.randint(50, self.width - 50)
+            player.y = random.randint(50, self.height - 50)
+            player.direction = random.uniform(0, 2 * math.pi)
+            player.curve = [(player.x, player.y)]
+            player.alive = True
+            player.ink = 300
+            player.turning = None
+
+class Lobby:
+    def __init__(self, lobby_id: str):
+        self.lobby_id = lobby_id
+        self.players: Dict[str, Player] = {}
+        self.game_state = GameState()
+        self.status: str = "waiting"  # waiting/countdown/playing/results
+        self.countdown: int = 10
+        self.max_players: int = 6
+        self.colors = ["#FF6B6B", "#4ECDC4", "#45B7D1", "#96CEB4", "#FFEEAD", "#FF9999"]
+
+    def add_player(self, player_id: str, name: str):
+        color = self.colors[len(self.players) % len(self.colors)]
+        self.game_state.add_player(player_id, name, color)
+        self.players[player_id] = self.game_state.players[player_id]
+
+    def all_ready(self):
+        return len(self.players) >= 2 and all(p.ready for p in self.players.values())
 
 class ConnectionManager:
     def __init__(self):
         self.active_connections: Dict[str, WebSocket] = {}
-        self.game_state = GameState()
-        
+        self.lobbies: Dict[str, Lobby] = {}
+        self.player_lobby_map: Dict[str, str] = {}
+
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
         player_id = str(random.randint(1000, 9999))
         self.active_connections[player_id] = websocket
-
-        print(f"Connected player with id: {player_id}")
-        for i, player in enumerate(self.game_state.players.keys()):
-            print(f"Player #{i+1} - {player}")
-        self.game_state.add_player(player_id)
+        await self.send_lobby_list()  # Send the updated lobby list to the new player
         return player_id
-    
+
     def disconnect(self, player_id: str):
         if player_id in self.active_connections:
             del self.active_connections[player_id]
-            del self.game_state.players[player_id]
-            print(f"Disonnected player with id: {player_id}")
-    
-    async def broadcast_state(self):
-        """Broadcast game state to all connected players"""
-        if self.active_connections:
-            state = self.game_state.get_state()
-            for connection in self.active_connections.values():
-                await connection.send_json(state)
+        if player_id in self.player_lobby_map:
+            lobby_id = self.player_lobby_map[player_id]
+            if lobby_id in self.lobbies:
+                del self.lobbies[lobby_id].players[player_id]
+                del self.lobbies[lobby_id].game_state.players[player_id]
+                if not self.lobbies[lobby_id].players:
+                    del self.lobbies[lobby_id]
+                del self.player_lobby_map[player_id]
+                asyncio.create_task(self.send_lobby_list())  # Update lobby list after player leaves
+
+    async def broadcast_lobby(self, lobby: Lobby):
+        lobby_data = {
+            "type": "lobby_update",
+            "lobby_id": lobby.lobby_id,
+            "status": lobby.status,
+            "countdown": lobby.countdown,
+            "players": [{
+                "id": p.player_id,
+                "name": p.name,
+                "ready": p.ready,
+                "score": p.score,
+                "color": p.color
+            } for p in lobby.players.values()],
+            "round": lobby.game_state.round
+        }
+        #print(lobby_data)
+        #print(self.active_connections)
+        for ws in self.active_connections.values():
+            await ws.send_json(lobby_data)
 
     async def handle_input(self, player_id: str, data: dict):
-        if "direction" in data:
-           self.game_state.update_player_direction(player_id,data["direction"])
-        if "reset" in data:
-             self.game_state.reset()
+        print(f"Client | Player {player_id} requrested {data['type']}")
+        if data["type"] == "new_lobby":
+            lobby_id = str(random.randint(1000, 9999))
+            lobby = Lobby(lobby_id)
+            self.lobbies[lobby_id] = lobby
+            self.player_lobby_map[player_id] = lobby_id
+            await self.broadcast_lobby(lobby)
+            await self.send_lobby_list()  # Update lobby list after creating a new lobby
+
+        elif data["type"] == "join_lobby":
+            lobby_id = data["lobbyId"]
+            if lobby_id in self.lobbies:
+                self.lobbies[lobby_id].add_player(player_id, "Player")
+                self.player_lobby_map[player_id] = lobby_id
+                await self.broadcast_lobby(self.lobbies[lobby_id])
+
+        elif data["type"] == "player_ready":
+            lobby_id = self.player_lobby_map.get(player_id)
+            if lobby_id and lobby_id in self.lobbies:
+                lobby = self.lobbies[lobby_id]
+                player = lobby.players.get(player_id)
+                if player:
+                    player.ready = not player.ready
+                    if lobby.all_ready() and lobby.status == "waiting":
+                        lobby.status = "countdown"
+                        asyncio.create_task(self.start_countdown(lobby))
+                    await self.broadcast_lobby(lobby)
+
+        elif data["type"] == "player_name":
+            lobby_id = self.player_lobby_map.get(player_id)
+            if lobby_id and lobby_id in self.lobbies:
+                lobby = self.lobbies[lobby_id]
+                player = lobby.players.get(player_id)
+                if player:
+                    player.name = data["name"][:15]
+                    await self.broadcast_lobby(lobby)
+
+        elif data["type"] == "player_input":
+            lobby_id = self.player_lobby_map.get(player_id)
+            if lobby_id and lobby_id in self.lobbies:
+                lobby = self.lobbies[lobby_id]
+                player = lobby.players.get(player_id)
+                if player:
+                    player.turning = data.get("direction")
+
+    async def send_lobby_list(self):
+        lobby_list = list(self.lobbies.keys())
+        for ws in self.active_connections.values():
+
+            for lobby in self.lobbies.values():
+                await self.broadcast_lobby(lobby)
+
+            #await ws.send_json({
+            #    "type": "lobby_list",
+            #    "lobbies": lobby_list
+            #})
+
+    async def start_countdown(self, lobby: Lobby):
+        while lobby.countdown > 0 and lobby.status == "countdown":
+            await asyncio.sleep(1)
+            lobby.countdown -= 1
+            await self.broadcast_lobby(lobby)
+        
+        if lobby.status == "countdown":
+            lobby.status = "playing"
+            lobby.game_state.reset_round()
+            await self.broadcast_lobby(lobby)
+            asyncio.create_task(self.run_game_round(lobby))
+
+    async def run_game_round(self, lobby: Lobby):
+        start_time = time.time()
+        while lobby.status == "playing":
+            game_active = lobby.game_state.update()
+            await self.broadcast_game_state(lobby)
+            
+            if not game_active:
+                lobby.status = "results"
+                lobby.countdown = 8
+                # Update scores
+                for p in lobby.game_state.players.values():
+                    if p.alive:
+                        p.score += 1
+                await self.broadcast_lobby(lobby)
+                await asyncio.sleep(5)
+                lobby.status = "countdown"
+                lobby.countdown = 10
+                lobby.game_state.reset_round()
+                await self.start_countdown(lobby)
+                break
+            
+            await asyncio.sleep(1/60)
+
+    async def broadcast_game_state(self, lobby: Lobby):
+        game_state = {
+            "type": "game_state",
+            "players": [{
+                "x": p.x,
+                "y": p.y,
+                "direction": p.direction,
+                "color": p.color,
+                "curve": p.curve,
+                "alive": p.alive,
+                "ink": p.ink
+            } for p in lobby.game_state.players.values()]
+        }
+        for player_id in lobby.players:
+            if player_id in self.active_connections:
+                await self.active_connections[player_id].send_json(game_state)
 
 manager = ConnectionManager()
 
-async def game_loop():
-    server_ticks: int = 0
-    while True:
-
-        if server_ticks % 100 == 0:
-            server_ticks = 0
-            game_state  = manager.game_state.get_state()
-            for player in game_state["players"].keys():
-                    print(f"Player: {player}")
-        server_ticks += 1 
-        manager.game_state.update()
-        await manager.broadcast_state()
-        await asyncio.sleep(1/60)  # 60 FPS
-    
-
-@app.websocket("/ws/game")
+@app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     player_id = await manager.connect(websocket)
     try:
         while True:
             data = await websocket.receive_json()
-            await manager.handle_input(player_id,data)
+            await manager.handle_input(player_id, data)
     except WebSocketDisconnect:
         manager.disconnect(player_id)
-
-
-@app.on_event("startup")
-async def startup_event():
-  asyncio.create_task(game_loop())
 
 if __name__ == "__main__":
     import uvicorn
